@@ -226,8 +226,8 @@
         scene.add(player2);
 
         const players = [
-            { object: player1, velocityY: 0, isGrounded: true, spawnPoint: new THREE.Vector3(-2, 0.5, 0), controls: { forward: 'w', back: 's', left: 'a', right: 'd', jump: ' ' }, type: 'fire', name: 'Fireboy', standingOnPlatform: null },
-            { object: player2, velocityY: 0, isGrounded: true, spawnPoint: new THREE.Vector3(2, 0.5, 0), controls: { forward: 'arrowup', back: 'arrowdown', left: 'arrowleft', right: 'arrowright', jump: 'shift' }, type: 'water', name: 'Watergirl', standingOnPlatform: null }
+            { object: player1, velocityY: 0, isGrounded: true, spawnPoint: new THREE.Vector3(-2, 0.5, 0), controls: { forward: 'w', back: 's', left: 'a', right: 'd', jump: ' ' }, type: 'fire', name: 'Fireboy', walkPhase: 0 },
+            { object: player2, velocityY: 0, isGrounded: true, spawnPoint: new THREE.Vector3(2, 0.5, 0), controls: { forward: 'arrowup', back: 'arrowdown', left: 'arrowleft', right: 'arrowright', jump: 'shift' }, type: 'water', name: 'Watergirl', walkPhase: 0 }
         ];
         const floorGeometry = new THREE.PlaneGeometry(80, 80);
         // NEW: Floor material and mesh with color of real earth
@@ -273,7 +273,7 @@
             jumpWgSound.setBuffer(buffer);
             jumpWgSound.setVolume(0.5);
         });
-        audioLoader.load('SurvivalMusic.mp3', (buffer) => {
+        audioLoader.load('SurvivalMusic1.mp3', (buffer) => {
             SurvivalMusic.setBuffer(buffer);
             SurvivalMusic.setVolume(0.5);
         });
@@ -525,9 +525,6 @@
             const gemData = [
                 { pos: [-6, 2, -4], type: 'fire' }, { pos: [6, 2, -4], type: 'water' },
                 { pos: [-6, 4, -12], type: 'fire' }, { pos: [6, 4, -12], type: 'water' },
-                // NEW: Neutral gems as points of contention
-                { pos: [0, 6, -15], type: 'neutral' },
-                { pos: [0, 8, -18], type: 'neutral' }
             ];
             gemData.forEach(data => {
                 const mat = data.type === 'fire' ? redGemMat : (data.type === 'water' ? blueGemMat : neutralGemMat);
@@ -548,7 +545,7 @@
         function getPlayerBounds(player) {
             return {
                 minX: player.position.x - 0.5, maxX: player.position.x + 0.5,
-                minY: player.position.y - 0.5, maxY: player.position.y + 1.3,
+                minY: player.position.y, maxY: player.position.y + 1.8, // Feet at y=0, height is 1.8
                 minZ: player.position.z - 0.5, maxZ: player.position.z + 0.5
             };
         }
@@ -574,6 +571,45 @@
             const controls = playerData.controls;
             if (keys[controls.left]) player.rotation.y += playerRotationSpeed;
             if (keys[controls.right]) player.rotation.y -= playerRotationSpeed;
+
+            // --- Animation Logic ---
+            const animParts = player.userData.anim;
+            const isMoving = (keys[controls.forward] || keys[controls.back]) && playerData.isGrounded;
+
+            if (playerData.isGrounded) {
+                // On the ground: either walking or returning to idle
+                if (isMoving) {
+                    // Walking animation
+                    playerData.walkPhase += 0.2; // Animation speed
+                    const walkCycle = Math.sin(playerData.walkPhase);
+                    const bobble = Math.abs(walkCycle) * 0.05; // Body bob
+                    animParts.body.position.y = 0.8 + bobble;
+                    animParts.headGroup.position.y = 1.5 + bobble;
+                    animParts.armL.rotation.x = walkCycle * 0.8;
+                    animParts.armR.rotation.x = -walkCycle * 0.8;
+                    animParts.legL.rotation.x = -walkCycle * 1.0;
+                    animParts.legR.rotation.x = walkCycle * 1.0;
+                } else {
+                    // Idle animation (smoothly return to base pose from walking or jumping)
+                    playerData.walkPhase = 0;
+                    animParts.body.position.y = THREE.MathUtils.lerp(animParts.body.position.y, 0.8, 0.1);
+                    animParts.headGroup.position.y = THREE.MathUtils.lerp(animParts.headGroup.position.y, 1.5, 0.1);
+                    animParts.armL.rotation.x = THREE.MathUtils.lerp(animParts.armL.rotation.x, 0, 0.1);
+                    animParts.armR.rotation.x = THREE.MathUtils.lerp(animParts.armR.rotation.x, 0, 0.1);
+                    animParts.legL.rotation.x = THREE.MathUtils.lerp(animParts.legL.rotation.x, 0, 0.1);
+                    animParts.legR.rotation.x = THREE.MathUtils.lerp(animParts.legR.rotation.x, 0, 0.1);
+                }
+            } else {
+                // In the air: jump/fall animation
+                playerData.walkPhase = 0;
+                animParts.body.position.y = THREE.MathUtils.lerp(animParts.body.position.y, 0.7, 0.1);
+                animParts.headGroup.position.y = THREE.MathUtils.lerp(animParts.headGroup.position.y, 1.4, 0.1);
+                animParts.armL.rotation.x = THREE.MathUtils.lerp(animParts.armL.rotation.x, -0.5, 0.1);
+                animParts.armR.rotation.x = THREE.MathUtils.lerp(animParts.armR.rotation.x, -0.5, 0.1);
+                animParts.legL.rotation.x = THREE.MathUtils.lerp(animParts.legL.rotation.x, 0.8, 0.1);
+                animParts.legR.rotation.x = THREE.MathUtils.lerp(animParts.legR.rotation.x, 0.8, 0.1);
+            }
+
             const moveDirection = new THREE.Vector3();
             if (keys[controls.forward]) moveDirection.z = -1;
             if (keys[controls.back]) moveDirection.z = 1;
@@ -610,11 +646,11 @@
                 const platformBounds = getObjectBounds(platform);
                 if (checkCollision(newPlayerBounds, platformBounds)) {
                     if (playerData.velocityY <= 0) {
-                        player.position.y = platformBounds.maxY + 0.5;
+                        player.position.y = platformBounds.maxY;
                         playerData.velocityY = 0;
                         playerData.isGrounded = true;
                     } else {
-                        player.position.y = platformBounds.minY - 1.3;
+                        player.position.y = platformBounds.minY - 1.8;
                         playerData.velocityY = 0;
                     }
                     break;
@@ -853,6 +889,18 @@
             document.getElementById(screenId)?.classList.remove('hidden');
         }
     
+        function resetPlayerAnimation(playerData) {
+            const animParts = playerData.object.userData.anim;
+            if (!animParts) return;
+            playerData.walkPhase = 0;
+            animParts.body.position.y = 0.8;
+            animParts.headGroup.position.y = 1.5;
+            animParts.armL.rotation.set(0, 0, 0);
+            animParts.armR.rotation.set(0, 0, 0);
+            animParts.legL.rotation.set(0, 0, 0);
+            animParts.legR.rotation.set(0, 0, 0);
+        }
+
         function resetLevelState(isNewGame) {
             raceFinished = false;
             const defaultSpawn1 = new THREE.Vector3(-2, 0.5, 0);
@@ -875,6 +923,7 @@
                 p.object.position.copy(p.spawnPoint);
                 p.velocityY = 0;
                 p.isGrounded = true;
+                resetPlayerAnimation(p);
             });
         }
     
