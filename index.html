@@ -173,8 +173,10 @@
         let raceFinished = false;
         let totalRedCollectibles = 0;
         let totalBlueCollectibles = 0;
+        let totalNeutralCollectibles = 0;
         let redCollectedCount = 0;
         let blueCollectedCount = 0;
+        let neutralCollectedCount = 0;
 
     
         // --- SAVE/LOAD ---
@@ -389,8 +391,10 @@
             collectibles.length = 0;
             totalRedCollectibles = 0;
             totalBlueCollectibles = 0;
+            totalNeutralCollectibles = 0;
             redCollectedCount = 0;
             blueCollectedCount = 0;
+            neutralCollectedCount = 0;
         }
     
         function buildTeamworkLevel() {
@@ -458,24 +462,30 @@
             // NEW: Add collectibles
             const redGemMat = new THREE.MeshStandardMaterial({ color: 0xff5555, emissive: 0xff5555, emissiveIntensity: 0.6, metalness: 0.6, roughness: 0.3 });
             const blueGemMat = new THREE.MeshStandardMaterial({ color: 0x5599ff, emissive: 0x5599ff, emissiveIntensity: 0.6, metalness: 0.6, roughness: 0.3 });
+            const neutralGemMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, emissive: 0xcccccc, emissiveIntensity: 0.5, metalness: 0.9, roughness: 0.1 });
             const gemGeo = new THREE.OctahedronGeometry(0.3, 0);
             const gemData = [
                 { pos: new THREE.Vector3(-5, 3.5, 0), type: 'fire' },
                 { pos: new THREE.Vector3(0, 5.5, -5), type: 'water' },
                 { pos: new THREE.Vector3(5, 7.5, 0), type: 'fire' },
                 { pos: new THREE.Vector3(5, 6.5, -10), type: 'water' },
-                { pos: new THREE.Vector3(0, 9, -12), type: 'fire' }
+                { pos: new THREE.Vector3(0, 9, -12), type: 'fire' },
+                // NEW: Neutral gems
+                { pos: new THREE.Vector3(0, 2, -2), type: 'neutral' },
+                { pos: new THREE.Vector3(2.5, 6.5, -7.5), type: 'neutral' }
             ];
             gemData.forEach(data => {
-                const mat = data.type === 'fire' ? redGemMat : blueGemMat;
+                const mat = data.type === 'fire' ? redGemMat : (data.type === 'water' ? blueGemMat : neutralGemMat);
                 const gem = new THREE.Mesh(gemGeo, mat);
                 gem.position.copy(data.pos);
                 scene.add(gem);
                 collectibles.push({ mesh: gem, type: data.type });
                 if (data.type === 'fire') {
                     totalRedCollectibles++;
-                } else {
+                } else if (data.type === 'water') {
                     totalBlueCollectibles++;
+                } else {
+                    totalNeutralCollectibles++;
                 }
             });
         }
@@ -510,23 +520,27 @@
             // NEW: Add collectibles for competition
             const redGemMat = new THREE.MeshStandardMaterial({ color: 0xff5555, emissive: 0xff5555, emissiveIntensity: 0.6, metalness: 0.6, roughness: 0.3 });
             const blueGemMat = new THREE.MeshStandardMaterial({ color: 0x5599ff, emissive: 0x5599ff, emissiveIntensity: 0.6, metalness: 0.6, roughness: 0.3 });
+            const neutralGemMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, emissive: 0xcccccc, emissiveIntensity: 0.5, metalness: 0.9, roughness: 0.1 });
             const gemGeo = new THREE.OctahedronGeometry(0.3, 0);
             const gemData = [
                 { pos: [-6, 2, -4], type: 'fire' }, { pos: [6, 2, -4], type: 'water' },
                 { pos: [-6, 4, -12], type: 'fire' }, { pos: [6, 4, -12], type: 'water' },
-                { pos: [0, 6, -15], type: 'fire' },
-                { pos: [0, 8, -18], type: 'water' }
+                // NEW: Neutral gems as points of contention
+                { pos: [0, 6, -15], type: 'neutral' },
+                { pos: [0, 8, -18], type: 'neutral' }
             ];
             gemData.forEach(data => {
-                const mat = data.type === 'fire' ? redGemMat : blueGemMat;
+                const mat = data.type === 'fire' ? redGemMat : (data.type === 'water' ? blueGemMat : neutralGemMat);
                 const gem = new THREE.Mesh(gemGeo, mat);
                 gem.position.set(...data.pos);
                 scene.add(gem);
                 collectibles.push({ mesh: gem, type: data.type });
                 if (data.type === 'fire') {
                     totalRedCollectibles++;
-                } else {
+                } else if (data.type === 'water') {
                     totalBlueCollectibles++;
+                } else {
+                    totalNeutralCollectibles++;
                 }
             });
         }
@@ -625,14 +639,18 @@
             for (let i = collectibles.length - 1; i >= 0; i--) {
                 const gemData = collectibles[i];
                 const gem = gemData.mesh;
-                // Check if the player type matches the gem type
-                if (playerData.type === gemData.type && checkCollision(playerBoundsForCollect, getObjectBounds(gem))) {
+                // A player can collect their own color OR a neutral gem
+                const canCollect = (playerData.type === gemData.type) || (gemData.type === 'neutral');
+
+                if (canCollect && checkCollision(playerBoundsForCollect, getObjectBounds(gem))) {
                     scene.remove(gem);
                     collectibles.splice(i, 1);
                     if (gemData.type === 'fire') {
                         redCollectedCount++;
-                    } else {
+                    } else if (gemData.type === 'water') {
                         blueCollectedCount++;
+                    } else { // Neutral gem
+                        neutralCollectedCount++;
                     }
                     updateGemUI();
                     if (collectSound.isPlaying) collectSound.stop();
@@ -645,8 +663,9 @@
                     if (goal.player === playerIndex && !raceFinished) {
                         const allOwnGemsCollected = (playerData.type === 'fire' && redCollectedCount >= totalRedCollectibles) ||
                                                     (playerData.type === 'water' && blueCollectedCount >= totalBlueCollectibles);
+                        const allNeutralGemsCollected = neutralCollectedCount >= totalNeutralCollectibles;
 
-                        if (allOwnGemsCollected && checkCollision(getPlayerBounds(player), getObjectBounds(goal.object))) {
+                        if (allOwnGemsCollected && allNeutralGemsCollected && checkCollision(getPlayerBounds(player), getObjectBounds(goal.object))) {
                             raceFinished = true;
                             endGame(playerIndex);
                         }
@@ -679,7 +698,9 @@
         
         // NEW: Function to check for the teamwork win condition
         function checkTeamworkWin() {
-            const allGemsCollected = redCollectedCount >= totalRedCollectibles && blueCollectedCount >= totalBlueCollectibles;
+            const allGemsCollected = redCollectedCount >= totalRedCollectibles &&
+                                     blueCollectedCount >= totalBlueCollectibles &&
+                                     neutralCollectedCount >= totalNeutralCollectibles;
             if (gameMode !== 'teamwork' || raceFinished || goals.length < 2 || !allGemsCollected) return;
 
             const fireboyGoal = goals.find(g => g.player === 0)?.object;
@@ -707,11 +728,13 @@
         function updateGemUI() {
             if (!player1GemUI || !player2GemUI) return;
 
+            const neutralGemText = totalNeutralCollectibles > 0 ? `<br>Neutral: <span style="color: #cccccc;">${neutralCollectedCount} / ${totalNeutralCollectibles}</span>` : '';
+
             // Fireboy's UI (Player 1) - always shows red gem progress
-            player1GemUI.innerHTML = `Gems: <span style="color: #ff5555;">${redCollectedCount} / ${totalRedCollectibles}</span>`;
+            player1GemUI.innerHTML = `Gems: <span style="color: #ff5555;">${redCollectedCount} / ${totalRedCollectibles}</span>` + neutralGemText;
             
             // Watergirl's UI (Player 2) - always shows blue gem progress
-            player2GemUI.innerHTML = `Gems: <span style="color: #5599ff;">${blueCollectedCount} / ${totalBlueCollectibles}</span>`;
+            player2GemUI.innerHTML = `Gems: <span style="color: #5599ff;">${blueCollectedCount} / ${totalBlueCollectibles}</span>` + neutralGemText;
         }
 
         function endGame(winnerIndex) {
@@ -836,6 +859,7 @@
             const defaultSpawn2 = new THREE.Vector3(2, 0.5, 0);
             redCollectedCount = 0;
             blueCollectedCount = 0;
+            neutralCollectedCount = 0;
     
             if (gameMode === 'competition') {
                 players[0].spawnPoint.set(-6, 1.5, 2);
