@@ -436,7 +436,8 @@
             neutralCollectedCount = 0;
         }
     
-        function buildTeamworkLevel() {
+        /*
+        function buildTeamworkLevel_original() {
             clearLevel();
             const platMat = new THREE.MeshStandardMaterial({ color: 0x68d391 });
             const plat1 = new THREE.Mesh(new THREE.BoxGeometry(4, 1, 4), platMat);
@@ -662,6 +663,212 @@
                 startPos: sphereStartPos.clone()
             });
         }
+        */
+        function buildTeamworkLevel() {
+            clearLevel();
+
+            // --- MATERIALS ---
+            const platMat = new THREE.MeshStandardMaterial({ color: 0x68d391 });
+            const hazardRedMat = new THREE.MeshStandardMaterial({ color: 0xe53e3e });
+            const hazardBlueMat = new THREE.MeshStandardMaterial({ color: 0x3182ce });
+            const leverBaseMat = new THREE.MeshStandardMaterial({ color: 0x4a5568 });
+            const leverHandleMat = new THREE.MeshStandardMaterial({ color: 0xa0aec0 });
+            const movingPlatMat = new THREE.MeshStandardMaterial({ color: 0xf6e05e });
+            const doorMat = new THREE.MeshStandardMaterial({ color: 0x4a5568 });
+            const pressurePlateMat = new THREE.MeshStandardMaterial({ color: 0xf6ad55 });
+            const dualPlateMat = new THREE.MeshStandardMaterial({ color: 0x9f7aea, emissive: 0x9f7aea, emissiveIntensity: 0.2 });
+            const pushableMat = new THREE.MeshStandardMaterial({ color: 0x718096, metalness: 0.2, roughness: 0.8 });
+            const fireDoorMat = new THREE.MeshStandardMaterial({ color: 0xff3300, emissive: 0xff3300, emissiveIntensity: 0.6, transparent: true, opacity: 0.6 });
+            const waterDoorMat = new THREE.MeshStandardMaterial({ color: 0x3366ff, emissive: 0x3366ff, emissiveIntensity: 0.6, transparent: true, opacity: 0.6 });
+            const redGemMat = new THREE.MeshStandardMaterial({ color: 0xff5555, emissive: 0xff5555, emissiveIntensity: 0.6, metalness: 0.6, roughness: 0.3 });
+            const blueGemMat = new THREE.MeshStandardMaterial({ color: 0x5599ff, emissive: 0x5599ff, emissiveIntensity: 0.6, metalness: 0.6, roughness: 0.3 });
+            const neutralGemMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, emissive: 0xcccccc, emissiveIntensity: 0.5, metalness: 0.9, roughness: 0.1 });
+            const gemGeo = new THREE.OctahedronGeometry(0.3, 0);
+
+
+            // --- SECTION 1: THE SPLIT PATH ---
+
+            // Start platform
+            const startPlat = new THREE.Mesh(new THREE.BoxGeometry(10, 1, 6), platMat);
+            startPlat.position.set(0, 0, 0);
+            scene.add(startPlat);
+            platforms.push(startPlat);
+
+            // Path for Player 1 (Fireboy)
+            const p1_plat1 = new THREE.Mesh(new THREE.BoxGeometry(4, 1, 12), platMat);
+            p1_plat1.position.set(-7, 0, -9);
+            scene.add(p1_plat1);
+            platforms.push(p1_plat1);
+
+            // Water hazards on Fireboy's path
+            const water1 = new THREE.Mesh(new THREE.BoxGeometry(3, 0.2, 2), hazardBlueMat);
+            water1.position.set(-7, 1, -6);
+            scene.add(water1);
+            hazards.push({ object: water1, harmfulTo: 0 });
+
+            const water2 = new THREE.Mesh(new THREE.BoxGeometry(3, 0.2, 2), hazardBlueMat);
+            water2.position.set(-7, 1, -12);
+            scene.add(water2);
+            hazards.push({ object: water2, harmfulTo: 0 });
+
+            // Path for Player 2 (Watergirl)
+            const p2_plat1 = new THREE.Mesh(new THREE.BoxGeometry(4, 1, 12), platMat);
+            p2_plat1.position.set(7, 0, -9);
+            scene.add(p2_plat1);
+            platforms.push(p2_plat1);
+
+            // Fire hazards on Watergirl's path
+            const fire1 = new THREE.Mesh(new THREE.BoxGeometry(3, 0.2, 2), hazardRedMat);
+            fire1.position.set(7, 1, -6);
+            scene.add(fire1);
+            hazards.push({ object: fire1, harmfulTo: 1 });
+
+            const fire2 = new THREE.Mesh(new THREE.BoxGeometry(3, 0.2, 2), hazardRedMat);
+            fire2.position.set(7, 1, -12);
+            scene.add(fire2);
+            hazards.push({ object: fire2, harmfulTo: 1 });
+
+            // Lever for Fireboy to open a door for Watergirl
+            const lever1Base = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1, 0.5), leverBaseMat);
+            lever1Base.position.set(-7, 1.5, -15);
+            scene.add(lever1Base);
+            const lever1Handle = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.2, 0.1), leverHandleMat);
+            lever1Handle.position.set(-7, 2.1, -15);
+            lever1Handle.geometry.translate(0, -0.5, 0);
+            lever1Handle.rotation.z = -Math.PI / 4;
+            scene.add(lever1Handle);
+
+            const door1Mesh = new THREE.Mesh(new THREE.BoxGeometry(4, 3, 0.5), doorMat);
+            const door1Start = new THREE.Vector3(7, 1.5, -18);
+            const door1End = new THREE.Vector3(7, -1.5, -18);
+            door1Mesh.position.copy(door1Start);
+            scene.add(door1Mesh);
+            const door1Object = { mesh: door1Mesh, startPos: door1Start, endPos: door1End };
+            doors.push(door1Object);
+            platforms.push(door1Mesh);
+
+            levers.push({ mesh: lever1Base, handleMesh: lever1Handle, activated: false, linkedObject: { isActive: false, door: door1Object } });
+
+            // --- SECTION 2: THE VERTICAL CHALLENGE ---
+
+            // Rejoining platform
+            const rejoinPlat = new THREE.Mesh(new THREE.BoxGeometry(14, 1, 6), platMat);
+            rejoinPlat.position.set(0, -1, -22);
+            scene.add(rejoinPlat);
+            platforms.push(rejoinPlat);
+
+            // Vertical moving platform controlled by a dual pressure plate
+            const dualPlate1 = new THREE.Mesh(new THREE.BoxGeometry(3, 0.2, 2), dualPlateMat);
+            dualPlate1.position.set(0, 0, -20);
+            scene.add(dualPlate1);
+
+            const movingPlat1 = new THREE.Mesh(new THREE.BoxGeometry(3, 0.5, 3), movingPlatMat);
+            const mp1Waypoints = [new THREE.Vector3(0, 0, -25), new THREE.Vector3(0, 8, -25)];
+            movingPlat1.position.copy(mp1Waypoints[0]);
+            scene.add(movingPlat1);
+            platforms.push(movingPlat1);
+            const mp1Controller = { mesh: movingPlat1, waypoints: mp1Waypoints, currentTargetIndex: 1, speed: 0.03, isActive: false, velocity: new THREE.Vector3() };
+            movingPlatforms.push(mp1Controller);
+
+            dualPressurePlates.push({ mesh: dualPlate1, linkedDoor: { mesh: movingPlat1, startPos: mp1Waypoints[0], endPos: mp1Waypoints[1] }, isPressed: false, player1On: false, player2On: false });
+
+            // Upper platform
+            const upperPlat1 = new THREE.Mesh(new THREE.BoxGeometry(10, 1, 6), platMat);
+            upperPlat1.position.set(0, 8, -30);
+            scene.add(upperPlat1);
+            platforms.push(upperPlat1);
+
+            // Pushable block puzzle
+            const pushableCube1 = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), pushableMat);
+            const cube1StartPos = new THREE.Vector3(4, 9.5, -30);
+            pushableCube1.position.copy(cube1StartPos);
+            scene.add(pushableCube1);
+            platforms.push(pushableCube1);
+            pushableObjects.push({ mesh: pushableCube1, velocity: new THREE.Vector3(), isGrounded: false, mass: 2.0, frameVelocity: new THREE.Vector3(), startPos: cube1StartPos.clone() });
+
+            const pressurePlate1 = new THREE.Mesh(new THREE.BoxGeometry(2, 0.2, 2), pressurePlateMat);
+            pressurePlate1.position.set(-4, 9, -30);
+            scene.add(pressurePlate1);
+
+            const door2Mesh = new THREE.Mesh(new THREE.BoxGeometry(0.5, 4, 4), doorMat);
+            const door2Start = new THREE.Vector3(0, 11, -33);
+            const door2End = new THREE.Vector3(0, 7, -33);
+            door2Mesh.position.copy(door2Start);
+            scene.add(door2Mesh);
+            const door2Object = { mesh: door2Mesh, startPos: door2Start, endPos: door2End };
+            doors.push(door2Object);
+            platforms.push(door2Mesh);
+
+            pressurePlates.push({ mesh: pressurePlate1, linkedDoor: door2Object, isPressed: false });
+
+
+            // --- SECTION 3: THE FINAL ASCENT ---
+
+            const finalPlat1 = new THREE.Mesh(new THREE.BoxGeometry(8, 1, 4), platMat);
+            finalPlat1.position.set(0, 6, -38);
+            scene.add(finalPlat1);
+            platforms.push(finalPlat1);
+
+            // Timed puzzle
+            const timedPressurePlate = new THREE.Mesh(new THREE.BoxGeometry(2, 0.2, 2), pressurePlateMat);
+            timedPressurePlate.position.set(3, 7, -38);
+            scene.add(timedPressurePlate);
+
+            const timedDoorMesh = new THREE.Mesh(new THREE.BoxGeometry(4, 0.5, 4), movingPlatMat);
+            const timedDoorStart = new THREE.Vector3(-6, 6, -38);
+            const timedDoorEnd = new THREE.Vector3(-2, 6, -38);
+            timedDoorMesh.position.copy(timedDoorStart);
+            scene.add(timedDoorMesh);
+            const timedDoorObject = { mesh: timedDoorMesh, startPos: timedDoorStart, endPos: timedDoorEnd };
+            doors.push(timedDoorObject);
+            platforms.push(timedDoorMesh);
+
+            pressurePlates.push({ mesh: timedPressurePlate, linkedDoor: timedDoorObject, isPressed: false, timer: 5, countdown: 5 });
+
+            // Final goal platform
+            const goalPlat = new THREE.Mesh(new THREE.BoxGeometry(6, 1, 6), platMat);
+            goalPlat.position.set(-8, 6, -38);
+            scene.add(goalPlat);
+            platforms.push(goalPlat);
+
+            const fireDoor = new THREE.Mesh(new THREE.BoxGeometry(1.5, 3, 1.5), fireDoorMat);
+            fireDoor.position.set(-9, 7.5, -38);
+            scene.add(fireDoor);
+            goals.push({ object: fireDoor, player: 0 });
+
+            const waterDoor = new THREE.Mesh(new THREE.BoxGeometry(1.5, 3, 1.5), waterDoorMat);
+            waterDoor.position.set(-7, 7.5, -38);
+            scene.add(waterDoor);
+            goals.push({ object: waterDoor, player: 1 });
+
+            // --- COLLECTIBLES ---
+            const gemData = [
+                // Section 1
+                { pos: new THREE.Vector3(-7, 1.5, -3), type: 'fire' },
+                { pos: new THREE.Vector3(7, 1.5, -3), type: 'water' },
+                { pos: new THREE.Vector3(-7, 1.5, -9), type: 'neutral' },
+                { pos: new THREE.Vector3(7, 1.5, -9), type: 'neutral' },
+                // Section 2
+                { pos: new THREE.Vector3(0, 9.5, -25), type: 'fire' },
+                { pos: new THREE.Vector3(0, 9.5, -25), type: 'water' },
+                { pos: new THREE.Vector3(4, 10.5, -30), type: 'neutral' },
+                // Section 3
+                { pos: new THREE.Vector3(3, 8.5, -38), type: 'neutral' },
+                { pos: new THREE.Vector3(-8, 7.5, -36), type: 'fire' },
+                { pos: new THREE.Vector3(-8, 7.5, -40), type: 'water' },
+            ];
+
+            gemData.forEach(data => {
+                const mat = data.type === 'fire' ? redGemMat : (data.type === 'water' ? blueGemMat : neutralGemMat);
+                const gem = new THREE.Mesh(gemGeo, mat);
+                gem.position.copy(data.pos);
+                scene.add(gem);
+                collectibles.push({ mesh: gem, type: data.type });
+                if (data.type === 'fire') totalRedCollectibles++;
+                else if (data.type === 'water') totalBlueCollectibles++;
+                else totalNeutralCollectibles++;
+            });
+        }
     
         function buildCompetitionLevel() {
             clearLevel();
@@ -740,16 +947,15 @@
         }
 
         function updatePressurePlates() {
+            const delta = 1 / 60; // Assuming 60 FPS
             pressurePlates.forEach(plate => {
                 let isObjectOnPlate = false;
-                // Check players
                 for (const player of players) {
                     if (checkCollision(getPlayerBounds(player.object), getObjectBounds(plate.mesh))) {
                         isObjectOnPlate = true;
                         break;
                     }
                 }
-                // Check pushable objects
                 if (!isObjectOnPlate) {
                     for (const pushable of pushableObjects) {
                         if (checkCollision(getObjectBounds(pushable.mesh), getObjectBounds(plate.mesh))) {
@@ -763,7 +969,7 @@
                 if (isObjectOnPlate) {
                     if (!plate.isPressed) {
                         plate.isPressed = true;
-                        // Door is opening, remove it from platforms so player can pass through
+                        if (plate.timer) plate.countdown = plate.timer;
                         const index = platforms.indexOf(door.mesh);
                         if (index > -1) {
                             platforms.splice(index, 1);
@@ -771,15 +977,23 @@
                     }
                 } else {
                     if (plate.isPressed) {
-                        plate.isPressed = false;
-                        // Door is closing, add it back to platforms
-                        if (!platforms.includes(door.mesh)) {
-                           platforms.push(door.mesh);
+                        if (plate.timer) {
+                            plate.countdown -= delta;
+                            if (plate.countdown <= 0) {
+                                plate.isPressed = false;
+                                if (!platforms.includes(door.mesh)) {
+                                    platforms.push(door.mesh);
+                                }
+                            }
+                        } else {
+                            plate.isPressed = false;
+                            if (!platforms.includes(door.mesh)) {
+                                platforms.push(door.mesh);
+                            }
                         }
                     }
                 }
 
-                // Move door based on plate state
                 const target = plate.isPressed ? door.endPos : door.startPos;
                 door.mesh.position.lerp(target, 0.05);
             });
@@ -888,38 +1102,49 @@
                 let target;
 
                 if (p.isActive) {
-                    // Active: Follow the waypoint path
-                    // Make sure the target index is valid
                     if (p.currentTargetIndex >= p.waypoints.length) {
                         p.currentTargetIndex = p.waypoints.length - 1;
                     }
                     target = p.waypoints[p.currentTargetIndex];
-
-                    // If we've reached the current target, aim for the next one
                     if (p.mesh.position.distanceTo(target) < 0.05) {
                         if (p.currentTargetIndex < p.waypoints.length - 1) {
                             p.currentTargetIndex++;
                         }
                     }
                 } else {
-                    // Inactive: Return to the start (waypoint 0)
                     target = p.waypoints[0];
-                    // Once back at the start, reset the path progress for the next activation
                     if (p.mesh.position.distanceTo(target) < 0.05) {
                         p.currentTargetIndex = 1;
                     }
                 }
                 p.mesh.position.lerp(target, p.speed);
-                // Calculate velocity for this frame to carry the player
                 p.velocity.subVectors(p.mesh.position, oldPos);
             });
 
-            // NEW: Pusher movement logic
+            levers.forEach(lever => {
+                if (lever.linkedObject && lever.linkedObject.door) {
+                    const door = lever.linkedObject.door;
+                    const target = lever.activated ? door.endPos : door.startPos;
+                    door.mesh.position.lerp(target, 0.05);
+
+                    if (lever.activated) {
+                        const index = platforms.indexOf(door.mesh);
+                        if (index > -1) {
+                            platforms.splice(index, 1);
+                        }
+                    } else {
+                        if (!platforms.includes(door.mesh)) {
+                           platforms.push(door.mesh);
+                        }
+                    }
+                }
+            });
+
             pushers.forEach(pusher => {
                 const oldPos = pusher.mesh.position.clone();
                 const target = pusher.direction === 1 ? pusher.endPos : pusher.startPos;
                 if (pusher.mesh.position.distanceTo(target) < 0.1) {
-                    pusher.direction *= -1; // Reverse direction
+                    pusher.direction *= -1;
                 }
                 const moveDirection = new THREE.Vector3().subVectors(target, pusher.mesh.position).normalize();
                 pusher.mesh.position.add(moveDirection.multiplyScalar(pusher.speed));
@@ -936,17 +1161,18 @@
             // --- Animation Logic ---
             const animParts = player.userData.anim;
 
-            // NEW: Interaction logic
             if (keys[controls.interact]) {
                 for (const lever of levers) {
-                    if (player.position.distanceTo(lever.mesh.position) < 2.5) { // Interaction radius
+                    if (player.position.distanceTo(lever.mesh.position) < 2.5) {
                         lever.activated = !lever.activated;
                         lever.handleMesh.rotation.z = lever.activated ? Math.PI / 4 : -Math.PI / 4;
-                        lever.linkedObject.isActive = lever.activated;
-                        break; // Interact with one lever at a time
+                        if (lever.linkedObject && 'isActive' in lever.linkedObject) {
+                            lever.linkedObject.isActive = lever.activated;
+                        }
+                        break;
                     }
                 }
-                keys[controls.interact] = false; // Consume the key press for this frame
+                keys[controls.interact] = false;
             }
             const isMoving = (keys[controls.forward] || keys[controls.back]) && playerData.isGrounded;
 
