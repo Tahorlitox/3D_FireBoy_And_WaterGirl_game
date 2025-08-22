@@ -223,7 +223,7 @@
         const movingPlatforms = [];
         const doors = [];
         const pushers = [];
-        const pressurePlates = [];
+        const dualPressurePlates = [];
         // NEW: Player 1 (WASD) is now Fireboy (Red), Player 2 (Arrows) is Watergirl (Blue)
         const player1 = createPlayer(0xff3300, 'fire'); // Red
         scene.add(player1);
@@ -234,13 +234,13 @@
             { object: player1, velocityY: 0, isGrounded: true, groundedOn: null, spawnPoint: new THREE.Vector3(-2, 0.5, 0), controls: { forward: 'w', back: 's', left: 'a', right: 'd', jump: ' ', interact: 'e' }, type: 'fire', name: 'Fireboy', walkPhase: 0 },
             { object: player2, velocityY: 0, isGrounded: true, groundedOn: null, spawnPoint: new THREE.Vector3(2, 0.5, 0), controls: { forward: 'arrowup', back: 'arrowdown', left: 'arrowleft', right: 'arrowright', jump: 'shift', interact: 'enter' }, type: 'water', name: 'Watergirl', walkPhase: 0 }
         ];
-        const floorGeometry = new THREE.PlaneGeometry(80, 80);
+        const floorGeometry = new THREE.PlaneGeometry(120, 120);
         // NEW: Floor material and mesh with color of real earth
         const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513, side: THREE.DoubleSide });
         floorMaterial.map = new THREE.TextureLoader().load('https://threejs.org/examples/textures/terrain/grasslight-big.jpg');
         floorMaterial.map.wrapS = THREE.RepeatWrapping;
         floorMaterial.map.wrapT = THREE.RepeatWrapping;
-        floorMaterial.map.repeat.set(10, 10);
+        floorMaterial.map.repeat.set(15, 15);
         floorMaterial.needsUpdate = true;
         floorMaterial.side = THREE.DoubleSide; // Ensure both sides are rendered
         floorMaterial.transparent = true; // Allow transparency for better visuals
@@ -405,6 +405,8 @@
             // NEW: Clear new interactive elements
             pressurePlates.forEach(p => scene.remove(p.mesh));
             pressurePlates.length = 0;
+            dualPressurePlates.forEach(p => scene.remove(p.mesh));
+            dualPressurePlates.length = 0;
             doors.forEach(d => scene.remove(d.mesh));
             doors.length = 0;
             pushers.forEach(p => scene.remove(p.mesh));
@@ -537,7 +539,7 @@
             const doorEnd = new THREE.Vector3(0, 7, -12); // Moves down
             doorMesh.position.copy(doorStart);
             scene.add(doorMesh);
-
+            
             const doorObject = {
                 mesh: doorMesh,
                 startPos: doorStart,
@@ -580,6 +582,35 @@
                 } else {
                     totalNeutralCollectibles++;
                 }
+            });
+
+            // NEW: Add a dual pressure plate and a gate that requires both players
+            const dualPlateMat = new THREE.MeshStandardMaterial({ color: 0x9f7aea, emissive: 0x9f7aea, emissiveIntensity: 0.2 });
+            const dualPlateMesh = new THREE.Mesh(new THREE.BoxGeometry(3, 0.2, 2), dualPlateMat);
+            dualPlateMesh.position.set(-5, 2.6, 2); // On the first big platform
+            scene.add(dualPlateMesh);
+
+            const dualDoorMat = new THREE.MeshStandardMaterial({ color: 0x4a5568 });
+            const dualDoorMesh = new THREE.Mesh(new THREE.BoxGeometry(0.5, 4, 4), dualDoorMat);
+            const dualDoorStart = new THREE.Vector3(-2, 2, -3); // Blocking the path to the next platform
+            const dualDoorEnd = new THREE.Vector3(-2, -2, -3); // Moves down out of the way
+            dualDoorMesh.position.copy(dualDoorStart);
+            scene.add(dualDoorMesh);
+
+            const dualDoorObject = {
+                mesh: dualDoorMesh,
+                startPos: dualDoorStart,
+                endPos: dualDoorEnd,
+            };
+            doors.push(dualDoorObject); // Re-use the doors array for the object itself
+            platforms.push(dualDoorMesh); // Add door to platforms for collision
+
+            dualPressurePlates.push({
+                mesh: dualPlateMesh,
+                linkedDoor: dualDoorObject,
+                isPressed: false,
+                player1On: false, // Track each player
+                player2On: false
             });
         }
     
@@ -644,7 +675,7 @@
         }
     
         function getObjectBounds(object) {
-            if (object === floor) return { minX: -40, maxX: 40, minY: -0.1, maxY: 0.1, minZ: -40, maxZ: 40 };
+            if (object === floor) return { minX: -60, maxX: 60, minY: -0.1, maxY: 0.1, minZ: -60, maxZ: 60 };
             const box = new THREE.Box3().setFromObject(object);
             return {
                 minX: box.min.x, maxX: box.max.x,
@@ -686,6 +717,44 @@
                         if (!platforms.includes(door.mesh)) {
                            platforms.push(door.mesh);
                         }
+                    }
+                }
+
+                // Move door based on plate state
+                const target = plate.isPressed ? door.endPos : door.startPos;
+                door.mesh.position.lerp(target, 0.05);
+            });
+        }
+
+        function updateDualPressurePlates() {
+            dualPressurePlates.forEach(plate => {
+                const plateBounds = getObjectBounds(plate.mesh);
+                
+                // Check each player
+                plate.player1On = checkCollision(getPlayerBounds(players[0].object), plateBounds);
+                plate.player2On = checkCollision(getPlayerBounds(players[1].object), plateBounds);
+
+                const bothPlayersOn = plate.player1On && plate.player2On;
+                const door = plate.linkedDoor;
+
+                if (bothPlayersOn) {
+                    if (!plate.isPressed) {
+                        plate.isPressed = true;
+                        // Door is opening, remove from collision
+                        const index = platforms.indexOf(door.mesh);
+                        if (index > -1) {
+                            platforms.splice(index, 1);
+                        }
+                        plate.mesh.material.emissive.setHex(0xffffff); // Glow when active
+                    }
+                } else {
+                    if (plate.isPressed) {
+                        plate.isPressed = false;
+                        // Door is closing, add back to collision
+                        if (!platforms.includes(door.mesh)) {
+                           platforms.push(door.mesh);
+                        }
+                        plate.mesh.material.emissive.setHex(0x9f7aea); // Revert emissive color
                     }
                 }
 
@@ -1038,7 +1107,8 @@
                     gemData.mesh.rotation.y += 0.02;
                 });
                 updateInteractiveObjects();
-                updatePressurePlates(); // NEW
+                updatePressurePlates();
+                updateDualPressurePlates();
                 players.forEach((player, index) => updatePlayer(player, index));
                 updateCheckpoints();
                 checkTeamworkWin(); // NEW
