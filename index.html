@@ -221,6 +221,9 @@
         const collectibles = [];
         const levers = [];
         const movingPlatforms = [];
+        const doors = [];
+        const pushers = [];
+        const pressurePlates = [];
         // NEW: Player 1 (WASD) is now Fireboy (Red), Player 2 (Arrows) is Watergirl (Blue)
         const player1 = createPlayer(0xff3300, 'fire'); // Red
         scene.add(player1);
@@ -398,6 +401,15 @@
             movingPlatforms.length = 0;
             collectibles.forEach(c => scene.remove(c.mesh));
             collectibles.length = 0;
+
+            // NEW: Clear new interactive elements
+            pressurePlates.forEach(p => scene.remove(p.mesh));
+            pressurePlates.length = 0;
+            doors.forEach(d => scene.remove(d.mesh));
+            doors.length = 0;
+            pushers.forEach(p => scene.remove(p.mesh));
+            pushers.length = 0;
+
             totalRedCollectibles = 0;
             totalBlueCollectibles = 0;
             totalNeutralCollectibles = 0;
@@ -496,6 +508,49 @@
             waterDoor.position.set(1.5, 9.75, -15); // On top of the final platform
             scene.add(waterDoor);
             goals.push({ object: waterDoor, player: 1 }); // Goal for Watergirl
+
+            // NEW: Add a pusher
+            const pusherMat = new THREE.MeshStandardMaterial({ color: 0x9f7aea, emissive: 0x9f7aea, emissiveIntensity: 0.4 });
+            const pusherMesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 0.5), pusherMat);
+            const pusherStart = new THREE.Vector3(2, 1, -8);
+            const pusherEnd = new THREE.Vector3(-2, 1, -8);
+            pusherMesh.position.copy(pusherStart);
+            scene.add(pusherMesh);
+            pushers.push({
+                mesh: pusherMesh,
+                startPos: pusherStart,
+                endPos: pusherEnd,
+                speed: 0.03,
+                direction: 1,
+                velocity: new THREE.Vector3()
+            });
+
+            // NEW: Add a pressure plate and a gate (door)
+            const pressurePlateMat = new THREE.MeshStandardMaterial({ color: 0xf6ad55 });
+            const pressurePlateMesh = new THREE.Mesh(new THREE.BoxGeometry(2, 0.2, 2), pressurePlateMat);
+            pressurePlateMesh.position.set(0, 8.6, -10); // On the final platform
+            scene.add(pressurePlateMesh);
+
+            const doorMat = new THREE.MeshStandardMaterial({ color: 0x4a5568 });
+            const doorMesh = new THREE.Mesh(new THREE.BoxGeometry(4, 3, 0.5), doorMat);
+            const doorStart = new THREE.Vector3(0, 10, -12);
+            const doorEnd = new THREE.Vector3(0, 7, -12); // Moves down
+            doorMesh.position.copy(doorStart);
+            scene.add(doorMesh);
+
+            const doorObject = {
+                mesh: doorMesh,
+                startPos: doorStart,
+                endPos: doorEnd,
+            };
+            doors.push(doorObject);
+            platforms.push(doorMesh); // Add door to platforms for collision
+
+            pressurePlates.push({
+                mesh: pressurePlateMesh,
+                linkedDoor: doorObject,
+                isPressed: false
+            });
 
             // NEW: Add collectibles
             const redGemMat = new THREE.MeshStandardMaterial({ color: 0xff5555, emissive: 0xff5555, emissiveIntensity: 0.6, metalness: 0.6, roughness: 0.3 });
@@ -604,6 +659,42 @@
                    bounds1.minZ < bounds2.maxZ && bounds1.maxZ > bounds2.minZ;
         }
 
+        function updatePressurePlates() {
+            pressurePlates.forEach(plate => {
+                let isAnyPlayerOnPlate = false;
+                for (const player of players) {
+                    if (checkCollision(getPlayerBounds(player.object), getObjectBounds(plate.mesh))) {
+                        isAnyPlayerOnPlate = true;
+                        break;
+                    }
+                }
+
+                const door = plate.linkedDoor;
+                if (isAnyPlayerOnPlate) {
+                    if (!plate.isPressed) {
+                        plate.isPressed = true;
+                        // Door is opening, remove it from platforms so player can pass through
+                        const index = platforms.indexOf(door.mesh);
+                        if (index > -1) {
+                            platforms.splice(index, 1);
+                        }
+                    }
+                } else {
+                    if (plate.isPressed) {
+                        plate.isPressed = false;
+                        // Door is closing, add it back to platforms
+                        if (!platforms.includes(door.mesh)) {
+                           platforms.push(door.mesh);
+                        }
+                    }
+                }
+
+                // Move door based on plate state
+                const target = plate.isPressed ? door.endPos : door.startPos;
+                door.mesh.position.lerp(target, 0.05);
+            });
+        }
+
         function updateInteractiveObjects() {
             movingPlatforms.forEach(p => {
                 const target = p.isActive ? p.endPos : p.startPos;
@@ -615,6 +706,18 @@
                 
                 // Calculate velocity for this frame to carry the player
                 p.velocity.subVectors(p.mesh.position, oldPos);
+            });
+
+            // NEW: Pusher movement logic
+            pushers.forEach(pusher => {
+                const oldPos = pusher.mesh.position.clone();
+                const target = pusher.direction === 1 ? pusher.endPos : pusher.startPos;
+                if (pusher.mesh.position.distanceTo(target) < 0.1) {
+                    pusher.direction *= -1; // Reverse direction
+                }
+                const moveDirection = new THREE.Vector3().subVectors(target, pusher.mesh.position).normalize();
+                pusher.mesh.position.add(moveDirection.multiplyScalar(pusher.speed));
+                pusher.velocity.subVectors(pusher.mesh.position, oldPos);
             });
         }
 
@@ -734,6 +837,13 @@
                 const movingPlatform = movingPlatforms.find(p => p.mesh === playerData.groundedOn);
                 if (movingPlatform) {
                     player.position.add(movingPlatform.velocity);
+                }
+            }
+
+            // NEW: Pusher collision
+            for (const pusher of pushers) {
+                if (checkCollision(getPlayerBounds(player), getObjectBounds(pusher.mesh))) {
+                    player.position.add(pusher.velocity);
                 }
             }
 
@@ -928,6 +1038,7 @@
                     gemData.mesh.rotation.y += 0.02;
                 });
                 updateInteractiveObjects();
+                updatePressurePlates(); // NEW
                 players.forEach((player, index) => updatePlayer(player, index));
                 updateCheckpoints();
                 checkTeamworkWin(); // NEW
