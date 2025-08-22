@@ -223,6 +223,7 @@
         const movingPlatforms = [];
         const doors = [];
         const pushers = [];
+        const pushableObjects = [];
         const dualPressurePlates = [];
         // NEW: Player 1 (WASD) is now Fireboy (Red), Player 2 (Arrows) is Watergirl (Blue)
         const player1 = createPlayer(0xff3300, 'fire'); // Red
@@ -286,7 +287,7 @@
             CompetitionMusic.setBuffer(buffer);
             CompetitionMusic.setVolume(0.5);
         });
-        audioLoader.load('collect.mp3', (buffer) => { // You will need to add a 'collect.mp3' file
+        audioLoader.load('collect.mp3', (buffer) => {
             collectSound.setBuffer(buffer);
             collectSound.setVolume(0.7);
         });
@@ -295,6 +296,19 @@
         const keys = {};
         document.addEventListener('keydown', (e) => keys[e.key.toLowerCase()] = true);
         document.addEventListener('keyup', (e) => keys[e.key.toLowerCase()] = false);
+        document.addEventListener('wheel', (e) => {
+            if (gameState !== 'playing' && gameState !== 'paused') return;
+
+            const zoomSpeed = 0.01;
+            let currentLength = cameraOffset.length();
+            // e.deltaY is positive for scrolling down (zoom out) and negative for up (zoom in)
+            let newLength = currentLength + e.deltaY * zoomSpeed;
+
+            // Clamp the zoom distance to prevent going too close or too far
+            const minZoom = 5;
+            const maxZoom = 20;
+            cameraOffset.setLength(Math.max(minZoom, Math.min(maxZoom, newLength)));
+        });
 
         // --- CORE GAME LOGIC ---
         const playerSpeed = 0.1;
@@ -411,6 +425,8 @@
             doors.length = 0;
             pushers.forEach(p => scene.remove(p.mesh));
             pushers.length = 0;
+            pushableObjects.forEach(p => scene.remove(p.mesh));
+            pushableObjects.length = 0;
 
             totalRedCollectibles = 0;
             totalBlueCollectibles = 0;
@@ -463,18 +479,21 @@
             scene.add(waterPuddle);
             hazards.push({ object: waterPuddle, harmfulTo: 0 }); // Harmful to Fireboy (player 0)
 
-            // NEW: Interactive elements - Lever and Moving Platform
+            // MODIFIED: The moving platform now follows a path defined by waypoints
             const movingPlatMat = new THREE.MeshStandardMaterial({ color: 0xf6e05e });
             const movingPlat = new THREE.Mesh(new THREE.BoxGeometry(3, 0.5, 3), movingPlatMat);
-            const startPos = new THREE.Vector3(0, 1, -10);
-            const endPos = new THREE.Vector3(0, 5, -10);
-            movingPlat.position.copy(startPos);
+            const waypoints = [
+                new THREE.Vector3(0, 1, -10),  // Start position (returns here when inactive)
+                new THREE.Vector3(0, 5, -10),  // Path point 1: Up
+                new THREE.Vector3(5, 5, -10)   // Path point 2: Right
+            ];
+            movingPlat.position.copy(waypoints[0]);
             scene.add(movingPlat);
             platforms.push(movingPlat); // Add to platforms for collision
             const platformController = {
                 mesh: movingPlat,
-                startPos,
-                endPos,
+                waypoints: waypoints,
+                currentTargetIndex: 1, // Start by moving towards the second point in the array
                 speed: 0.02,
                 isActive: false,
                 velocity: new THREE.Vector3()
@@ -612,6 +631,36 @@
                 player1On: false, // Track each player
                 player2On: false
             });
+
+            // NEW: Add pushable objects
+            const pushableMat = new THREE.MeshStandardMaterial({ color: 0x718096, metalness: 0.2, roughness: 0.8 });
+            const pushableCube = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), pushableMat);
+            const cubeStartPos = new THREE.Vector3(5, 7, 2);
+            pushableCube.position.copy(cubeStartPos); // On the third platform
+            scene.add(pushableCube);
+            platforms.push(pushableCube);
+            pushableObjects.push({
+                mesh: pushableCube,
+                velocity: new THREE.Vector3(),
+                isGrounded: false,
+                mass: 2.0, // Heavier
+                frameVelocity: new THREE.Vector3(),
+                startPos: cubeStartPos.clone()
+            });
+
+            const pushableSphere = new THREE.Mesh(new THREE.SphereGeometry(0.6, 16, 16), pushableMat);
+            const sphereStartPos = new THREE.Vector3(5, 7, -2);
+            pushableSphere.position.copy(sphereStartPos); // On the third platform
+            scene.add(pushableSphere);
+            platforms.push(pushableSphere);
+            pushableObjects.push({
+                mesh: pushableSphere,
+                velocity: new THREE.Vector3(),
+                isGrounded: false,
+                mass: 1.0, // Lighter
+                frameVelocity: new THREE.Vector3(),
+                startPos: sphereStartPos.clone()
+            });
         }
     
         function buildCompetitionLevel() {
@@ -692,16 +741,26 @@
 
         function updatePressurePlates() {
             pressurePlates.forEach(plate => {
-                let isAnyPlayerOnPlate = false;
+                let isObjectOnPlate = false;
+                // Check players
                 for (const player of players) {
                     if (checkCollision(getPlayerBounds(player.object), getObjectBounds(plate.mesh))) {
-                        isAnyPlayerOnPlate = true;
+                        isObjectOnPlate = true;
                         break;
+                    }
+                }
+                // Check pushable objects
+                if (!isObjectOnPlate) {
+                    for (const pushable of pushableObjects) {
+                        if (checkCollision(getObjectBounds(pushable.mesh), getObjectBounds(plate.mesh))) {
+                            isObjectOnPlate = true;
+                            break;
+                        }
                     }
                 }
 
                 const door = plate.linkedDoor;
-                if (isAnyPlayerOnPlate) {
+                if (isObjectOnPlate) {
                     if (!plate.isPressed) {
                         plate.isPressed = true;
                         // Door is opening, remove it from platforms so player can pass through
@@ -764,15 +823,93 @@
             });
         }
 
+        function updatePushableObjects() {
+            const friction = 0.95; // How quickly objects slow down
+
+            pushableObjects.forEach(obj => {
+                const oldPos = obj.mesh.position.clone();
+                // Apply gravity
+                obj.velocity.y += gravity;
+                obj.mesh.position.y += obj.velocity.y;
+
+                // Apply friction based on mass (heavier objects have more friction/slow down faster)
+                const effectiveFriction = Math.pow(friction, obj.mass || 1);
+                obj.velocity.x *= effectiveFriction;
+                obj.velocity.z *= effectiveFriction;
+
+                // Collision with platforms
+                obj.isGrounded = false;
+                let objBounds = getObjectBounds(obj.mesh);
+
+                for (const platform of platforms) {
+                    if (platform === obj.mesh) continue; // Don't collide with self
+                    const platformBounds = getObjectBounds(platform);
+                    if (checkCollision(objBounds, platformBounds)) {
+                        if (obj.velocity.y <= 0) { // Falling onto a platform
+                            obj.mesh.position.y = platformBounds.maxY + (objBounds.maxY - objBounds.minY) / 2;
+                            obj.velocity.y = 0;
+                            obj.isGrounded = true;
+                        } else { // Hitting a platform from below
+                            obj.mesh.position.y = platformBounds.minY - (objBounds.maxY - objBounds.minY) / 2;
+                            obj.velocity.y = 0;
+                        }
+                        break; // Stop after first collision
+                    }
+                }
+
+                // Move based on horizontal velocity and check for wall collisions
+                const originalX = obj.mesh.position.x;
+                const originalZ = obj.mesh.position.z;
+                obj.mesh.position.x += obj.velocity.x;
+                obj.mesh.position.z += obj.velocity.z;
+
+                objBounds = getObjectBounds(obj.mesh);
+                for (const platform of platforms) {
+                    if (platform === floor || platform === obj.mesh) continue; // Don't collide with self or floor
+                    const platformBounds = getObjectBounds(platform);
+                    if (checkCollision(objBounds, platformBounds) && objBounds.minY < platformBounds.maxY) {
+                        // A simple bounce-back effect
+                        obj.mesh.position.x = originalX;
+                        obj.mesh.position.z = originalZ;
+                        obj.velocity.x *= -0.5;
+                        obj.velocity.z *= -0.5;
+                        break;
+                    }
+                }
+
+                // Calculate the actual velocity for this frame to carry the player
+                obj.frameVelocity.subVectors(obj.mesh.position, oldPos);
+            });
+        }
+
         function updateInteractiveObjects() {
             movingPlatforms.forEach(p => {
-                const target = p.isActive ? p.endPos : p.startPos;
                 const oldPos = p.mesh.position.clone();
-        
-                if (p.mesh.position.distanceTo(target) > 0.01) {
-                    p.mesh.position.lerp(target, p.speed);
+                let target;
+
+                if (p.isActive) {
+                    // Active: Follow the waypoint path
+                    // Make sure the target index is valid
+                    if (p.currentTargetIndex >= p.waypoints.length) {
+                        p.currentTargetIndex = p.waypoints.length - 1;
+                    }
+                    target = p.waypoints[p.currentTargetIndex];
+
+                    // If we've reached the current target, aim for the next one
+                    if (p.mesh.position.distanceTo(target) < 0.05) {
+                        if (p.currentTargetIndex < p.waypoints.length - 1) {
+                            p.currentTargetIndex++;
+                        }
+                    }
+                } else {
+                    // Inactive: Return to the start (waypoint 0)
+                    target = p.waypoints[0];
+                    // Once back at the start, reset the path progress for the next activation
+                    if (p.mesh.position.distanceTo(target) < 0.05) {
+                        p.currentTargetIndex = 1;
+                    }
                 }
-                
+                p.mesh.position.lerp(target, p.speed);
                 // Calculate velocity for this frame to carry the player
                 p.velocity.subVectors(p.mesh.position, oldPos);
             });
@@ -855,16 +992,40 @@
             const originalZ = player.position.z;
             player.position.x += moveDirection.x;
             player.position.z += moveDirection.z;
+
+            // --- Horizontal Collision and Pushing Logic ---
             let playerBounds = getPlayerBounds(player);
-            for (const platform of platforms) {
-                if (platform === floor) continue;
-                const platformBounds = getObjectBounds(platform);
-                if (checkCollision(playerBounds, platformBounds) && playerBounds.minY < platformBounds.maxY + 0.1) {
-                    player.position.x = originalX;
-                    player.position.z = originalZ;
-                    break;
+            let collisionOccurred = false;
+
+            // 1. Check for collisions with pushable objects
+            for (const pushable of pushableObjects) {
+                if (checkCollision(playerBounds, getObjectBounds(pushable.mesh))) {
+                    const pushDirection = new THREE.Vector3().subVectors(pushable.mesh.position, player.position);
+                    pushDirection.y = 0;
+                    pushDirection.normalize();
+                    const basePushStrength = 0.05;
+                    const effectivePushStrength = basePushStrength / (pushable.mass || 1);
+                    pushable.velocity.add(pushDirection.multiplyScalar(effectivePushStrength));
+                    // Player is stopped by the object they are pushing
+                    player.position.set(originalX, player.position.y, originalZ);
+                    collisionOccurred = true;
+                    break; 
                 }
             }
+
+            // 2. If no pushable was hit, check for static walls
+            if (!collisionOccurred) {
+                for (const platform of platforms) {
+                    const isPushable = pushableObjects.some(p => p.mesh === platform);
+                    if (platform === floor || isPushable) continue; // Ignore floor and objects we already handled
+                    const platformBounds = getObjectBounds(platform);
+                    if (checkCollision(playerBounds, platformBounds) && playerBounds.minY < platformBounds.maxY + 0.1) {
+                        player.position.set(originalX, player.position.y, originalZ);
+                        break;
+                    }
+                }
+            }
+
             if (keys[controls.jump] && playerIndex === 0 && playerData.isGrounded) {
                 playerData.isGrounded = false;
                 playerData.velocityY = jumpHeight;
@@ -906,6 +1067,11 @@
                 const movingPlatform = movingPlatforms.find(p => p.mesh === playerData.groundedOn);
                 if (movingPlatform) {
                     player.position.add(movingPlatform.velocity);
+                }
+                const pushableObject = pushableObjects.find(p => p.mesh === playerData.groundedOn);
+                if (pushableObject) {
+                    // Move player with the pushable object
+                    player.position.add(pushableObject.frameVelocity);
                 }
             }
 
@@ -1069,7 +1235,7 @@
             }, 1000);
         }
     
-        const cameraOffset = new THREE.Vector3(0, 5, 8);
+        let cameraOffset = new THREE.Vector3(0, 5, 8);
         const smoothness = 0.05;
         function updateCamera(camera, player) {
             // 1. Calculate the ideal camera position as before
@@ -1108,6 +1274,7 @@
                 });
                 updateInteractiveObjects();
                 updatePressurePlates();
+                updatePushableObjects();
                 updateDualPressurePlates();
                 players.forEach((player, index) => updatePlayer(player, index));
                 updateCheckpoints();
@@ -1289,7 +1456,18 @@
         // --- EVENT LISTENERS ---
         resumeButton.addEventListener('click', togglePause);
         restartCheckpointButton.addEventListener('click', () => {
-            players.forEach(p => p.object.position.copy(p.spawnPoint));
+            // Reset players to their last checkpoint
+            players.forEach(p => {
+                p.object.position.copy(p.spawnPoint);
+                p.velocityY = 0;
+                p.isGrounded = true;
+            });
+            // Reset pushable objects to their initial positions
+            pushableObjects.forEach(obj => {
+                obj.mesh.position.copy(obj.startPos);
+                obj.velocity.set(0, 0, 0);
+                obj.frameVelocity.set(0, 0, 0);
+            });
             if(gameState === 'paused') togglePause();
         });
         returnToMenuButton.addEventListener('click', returnToMenu);
