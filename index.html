@@ -219,6 +219,8 @@
         const pressurePlates = [];
         const goals = [];
         const collectibles = [];
+        const levers = [];
+        const movingPlatforms = [];
         // NEW: Player 1 (WASD) is now Fireboy (Red), Player 2 (Arrows) is Watergirl (Blue)
         const player1 = createPlayer(0xff3300, 'fire'); // Red
         scene.add(player1);
@@ -226,8 +228,8 @@
         scene.add(player2);
 
         const players = [
-            { object: player1, velocityY: 0, isGrounded: true, spawnPoint: new THREE.Vector3(-2, 0.5, 0), controls: { forward: 'w', back: 's', left: 'a', right: 'd', jump: ' ' }, type: 'fire', name: 'Fireboy', walkPhase: 0 },
-            { object: player2, velocityY: 0, isGrounded: true, spawnPoint: new THREE.Vector3(2, 0.5, 0), controls: { forward: 'arrowup', back: 'arrowdown', left: 'arrowleft', right: 'arrowright', jump: 'shift' }, type: 'water', name: 'Watergirl', walkPhase: 0 }
+            { object: player1, velocityY: 0, isGrounded: true, groundedOn: null, spawnPoint: new THREE.Vector3(-2, 0.5, 0), controls: { forward: 'w', back: 's', left: 'a', right: 'd', jump: ' ', interact: 'e' }, type: 'fire', name: 'Fireboy', walkPhase: 0 },
+            { object: player2, velocityY: 0, isGrounded: true, groundedOn: null, spawnPoint: new THREE.Vector3(2, 0.5, 0), controls: { forward: 'arrowup', back: 'arrowdown', left: 'arrowleft', right: 'arrowright', jump: 'shift', interact: 'enter' }, type: 'water', name: 'Watergirl', walkPhase: 0 }
         ];
         const floorGeometry = new THREE.PlaneGeometry(80, 80);
         // NEW: Floor material and mesh with color of real earth
@@ -387,6 +389,13 @@
             hazards.length = 0;
             goals.forEach(g => scene.remove(g.object));
             goals.length = 0;
+            levers.forEach(l => {
+                scene.remove(l.mesh);
+                scene.remove(l.handleMesh);
+            });
+            levers.length = 0;
+            movingPlatforms.forEach(p => scene.remove(p.mesh));
+            movingPlatforms.length = 0;
             collectibles.forEach(c => scene.remove(c.mesh));
             collectibles.length = 0;
             totalRedCollectibles = 0;
@@ -439,6 +448,35 @@
             waterPuddle.position.set(5, 6.6, 1);
             scene.add(waterPuddle);
             hazards.push({ object: waterPuddle, harmfulTo: 0 }); // Harmful to Fireboy (player 0)
+
+            // NEW: Interactive elements - Lever and Moving Platform
+            const movingPlatMat = new THREE.MeshStandardMaterial({ color: 0xf6e05e });
+            const movingPlat = new THREE.Mesh(new THREE.BoxGeometry(3, 0.5, 3), movingPlatMat);
+            const startPos = new THREE.Vector3(0, 1, -10);
+            const endPos = new THREE.Vector3(0, 5, -10);
+            movingPlat.position.copy(startPos);
+            scene.add(movingPlat);
+            platforms.push(movingPlat); // Add to platforms for collision
+            const platformController = {
+                mesh: movingPlat,
+                startPos,
+                endPos,
+                speed: 0.02,
+                isActive: false,
+                velocity: new THREE.Vector3()
+            };
+            movingPlatforms.push(platformController);
+            const leverBaseMat = new THREE.MeshStandardMaterial({ color: 0x4a5568 });
+            const leverHandleMat = new THREE.MeshStandardMaterial({ color: 0xa0aec0 });
+            const leverBase = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1, 0.5), leverBaseMat);
+            leverBase.position.set(2, 4.5, -5); // On the second platform
+            scene.add(leverBase);
+            const leverHandle = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.2, 0.1), leverHandleMat);
+            leverHandle.position.set(2, 5.1, -5);
+            leverHandle.geometry.translate(0, -0.5, 0); // Set pivot to bottom
+            leverHandle.rotation.z = -Math.PI / 4;
+            scene.add(leverHandle);
+            levers.push({ mesh: leverBase, handleMesh: leverHandle, activated: false, linkedObject: platformController });
 
             // NEW: Final platform and player-specific goal doors
             const finalPlatform = new THREE.Mesh(new THREE.BoxGeometry(6, 0.5, 6), platMat);
@@ -566,6 +604,20 @@
                    bounds1.minZ < bounds2.maxZ && bounds1.maxZ > bounds2.minZ;
         }
 
+        function updateInteractiveObjects() {
+            movingPlatforms.forEach(p => {
+                const target = p.isActive ? p.endPos : p.startPos;
+                const oldPos = p.mesh.position.clone();
+        
+                if (p.mesh.position.distanceTo(target) > 0.01) {
+                    p.mesh.position.lerp(target, p.speed);
+                }
+                
+                // Calculate velocity for this frame to carry the player
+                p.velocity.subVectors(p.mesh.position, oldPos);
+            });
+        }
+
         function updatePlayer(playerData, playerIndex) {
             const player = playerData.object;
             const controls = playerData.controls;
@@ -574,6 +626,19 @@
 
             // --- Animation Logic ---
             const animParts = player.userData.anim;
+
+            // NEW: Interaction logic
+            if (keys[controls.interact]) {
+                for (const lever of levers) {
+                    if (player.position.distanceTo(lever.mesh.position) < 2.5) { // Interaction radius
+                        lever.activated = !lever.activated;
+                        lever.handleMesh.rotation.z = lever.activated ? Math.PI / 4 : -Math.PI / 4;
+                        lever.linkedObject.isActive = lever.activated;
+                        break; // Interact with one lever at a time
+                    }
+                }
+                keys[controls.interact] = false; // Consume the key press for this frame
+            }
             const isMoving = (keys[controls.forward] || keys[controls.back]) && playerData.isGrounded;
 
             if (playerData.isGrounded) {
@@ -640,12 +705,14 @@
             }
             playerData.velocityY += gravity;
             player.position.y += playerData.velocityY;
+            playerData.groundedOn = null; // Reset before checking
             playerData.isGrounded = false;
             let newPlayerBounds = getPlayerBounds(player);
             for (const platform of platforms) {
                 const platformBounds = getObjectBounds(platform);
                 if (checkCollision(newPlayerBounds, platformBounds)) {
                     if (playerData.velocityY <= 0) {
+                        playerData.groundedOn = platform; // Store which platform we're on
                         player.position.y = platformBounds.maxY;
                         playerData.velocityY = 0;
                         playerData.isGrounded = true;
@@ -661,6 +728,15 @@
                 playerData.velocityY = 0;
                 playerData.isGrounded = true;
             }
+
+            // NEW: Stick to moving platform
+            if (playerData.isGrounded && playerData.groundedOn) {
+                const movingPlatform = movingPlatforms.find(p => p.mesh === playerData.groundedOn);
+                if (movingPlatform) {
+                    player.position.add(movingPlatform.velocity);
+                }
+            }
+
             // MODIFIED: Hazard check now runs for both modes
             for (const hazard of hazards) {
                 if (hazard.harmfulTo === playerIndex && checkCollision(getPlayerBounds(player), getObjectBounds(hazard.object))) {
@@ -851,6 +927,7 @@
                 collectibles.forEach(gemData => {
                     gemData.mesh.rotation.y += 0.02;
                 });
+                updateInteractiveObjects();
                 players.forEach((player, index) => updatePlayer(player, index));
                 updateCheckpoints();
                 checkTeamworkWin(); // NEW
@@ -923,6 +1000,7 @@
                 p.object.position.copy(p.spawnPoint);
                 p.velocityY = 0;
                 p.isGrounded = true;
+                p.groundedOn = null;
                 resetPlayerAnimation(p);
             });
         }
